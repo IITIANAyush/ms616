@@ -23,5 +23,5 @@ ros2 topic pub --rate 10 /diff_drive_controller/cmd_vel_unstamped geometry_msgs/
 ### launching the overall setup : 
 
 ```
-ros2 launch gazebo.launch.py
+ros2 launch ms616 gazebo.launch.py
 ``` 
