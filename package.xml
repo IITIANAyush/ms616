@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ms616</name>
+  <version>0.0.1</version>
+  <description>URDF description, Gazebo simulation, and autonomous frontier-exploration mapping stack for the ms616 differential-drive robot</description>
+  <maintainer email="ayush@example.com">Ayush</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <!-- Visualization (existing) -->
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher_gui</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <!-- Simulation. NOTE: on this machine's ROS 2 package sync
+       (jammy, 2026-08 dated builds), ros-humble-ign-ros2-control is
+       an EMPTY compatibility shim with no shared libraries at all —
+       the real plugin (including the legacy-named
+       libign_ros2_control-system.so the URDF still references) is
+       shipped by ros-humble-gz-ros2-control. Depend on that instead. -->
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>gz_ros2_control</exec_depend>
+
+  <!-- ros2_control -->
+  <exec_depend>ros2_control</exec_depend>
+  <exec_depend>ros2_controllers</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>diff_drive_controller</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+
+  <!-- SLAM + Nav2 -->
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+
+  <!-- frontier_explorer node deps -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+    <!--
+      NOTE: this tag only sets GZ_SIM_RESOURCE_PATH, which is the
+      Harmonic/Garden-era variable name. True Fortress (gz-sim 6.18.0,
+      what this project targets) reads IGN_GAZEBO_RESOURCE_PATH
+      instead — confirmed empirically (GZ_SIM_RESOURCE_PATH was empty
+      at runtime while IGN_GAZEBO_RESOURCE_PATH was the one Gazebo
+      actually consulted). There is no package.xml export tag that
+      targets IGN_GAZEBO_RESOURCE_PATH specifically, so this tag is
+      kept only for forward-compatibility with newer Gazebo versions;
+      it does nothing useful on this machine. The actual fix lives in
+      gazebo.launch.py, which computes and injects
+      IGN_GAZEBO_RESOURCE_PATH directly via ExecuteProcess(additional_env=...).
+    -->
+    <gazebo_ros gazebo_model_path="${prefix}/.."/>
+  </export>
+</package>
