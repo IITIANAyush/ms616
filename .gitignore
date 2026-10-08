@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# ROS / Colcon generated files
+build/
+install/
+log/
+
+# Editor files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
