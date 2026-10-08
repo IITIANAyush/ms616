@@ -40,14 +40,20 @@
   <exec_depend>nav2_bringup</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
+<<<<<<< HEAD
   <exec_depend>ros_gz_interfaces</exec_depend>
+=======
+>>>>>>> origin/main
 
   <!-- frontier_explorer node deps -->
   <exec_depend>rclpy</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+<<<<<<< HEAD
   <exec_depend>sensor_msgs_py</exec_depend>
+=======
+>>>>>>> origin/main
 
   <export>
     <build_type>ament_cmake</build_type>
