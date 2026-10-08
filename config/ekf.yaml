@@ -1,0 +1,85 @@
+### ekf.yaml
+# robot_localization EKF node config.
+# Fuses wheel odom (/diff_drive_controller/odom) + IMU (/imu/data_raw)
+# into a single filtered odometry estimate: /odometry/filtered
+#
+# WHY 2D-CONSTRAINED CONFIG: this is a ground robot in a 2D maze —
+# we deliberately do NOT fuse z, roll, pitch, or their velocities.
+# Letting the EKF estimate unobserved states just injects noise.
+#
+# HARDWARE TRANSFER NOTE: this is the file you will retune the most
+# when moving to real hardware. The process_noise_covariance and the
+# two sensor config blocks below are where sim-vs-real differences
+# show up (real wheel encoders drift more in x/y than sim ones; real
+# low-cost IMUs have more gyro bias drift than the flat noise model
+# used in Gazebo). Expect to increase odom0_config position noise and
+# imu0_config orientation noise once on hardware — tune against real
+# logged data, don't guess.
+
+ekf_filter_node:
+  ros__parameters:
+    use_sim_time: true
+    frequency: 50.0
+    two_d_mode: true          # ground robot — ignore z/roll/pitch entirely
+    publish_tf: true          # publishes odom -> base_link
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom         # this EKF only fuses odom-frame sensors;
+                               # Cartographer owns map->odom separately
+
+    # --- Wheel odometry input ---
+    odom0: /diff_drive_controller/odom
+    odom0_config: [true,  true,  false,   # x, y, z position
+                   false, false, true,    # roll, pitch, yaw
+                   true,  true,  false,   # vx, vy, vz
+                   false, false, true,    # vroll, vpitch, vyaw
+                   false, false, false]   # ax, ay, az
+    odom0_differential: false
+    odom0_relative: false
+    odom0_queue_size: 5
+
+    # --- IMU input ---
+    imu0: /imu/data_raw
+    imu0_config: [false, false, false,    # x, y, z position (IMU doesn't give this)
+                  false, false, true,     # roll, pitch, yaw — fuse yaw only;
+                                           # roll/pitch fusion from accel is
+                                           # unreliable on a ground robot due
+                                           # to lateral acceleration during
+                                           # turns being misread as tilt
+                  false, false, false,    # vx, vy, vz
+                  false, false, true,     # vroll, vpitch, vyaw — this is the
+                                           # main signal we actually want: gyro
+                                           # yaw rate, much less noisy than
+                                           # wheel-odom-derived yaw rate
+                  true,  true,  false]    # ax, ay, az — linear accel, helps
+                                           # correct velocity estimate between
+                                           # wheel odom updates
+    imu0_differential: false
+    imu0_relative: true       # IMU orientation is relative to its own start,
+                               # not an absolute heading reference (no
+                               # magnetometer) — must be true or yaw will
+                               # be nonsense from the first callback
+    imu0_queue_size: 10
+    imu0_remove_gravitational_acceleration: true
+
+    # Process noise: how much we trust the motion model vs. the sensors
+    # between updates. Diagonal of a 15x15 (only listing the states we
+    # actually use above matter in two_d_mode). Start conservative;
+    # increase corresponding term if the filter feels "sluggish" to
+    # trust new sensor data, decrease if it's noisy/jittery.
+    process_noise_covariance: [  0.05,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+                                   0.0,   0.05,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+                                   0.0,    0.0,   0.06,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+                                   0.0,    0.0,    0.0,   0.03,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+                                   0.0,    0.0,    0.0,    0.0,   0.03,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+                                   0.0,    0.0,    0.0,    0.0,    0.0,   0.06,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,  0.025,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,  0.025,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,   0.04,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,   0.01,    0.0,    0.0,    0.0,    0.0,    0.0,
+                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,   0.01,    0.0,    0.0,    0.0,    0.0,
+                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,   0.02,    0.0,    0.0,    0.0,
+                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,   0.01,    0.0,    0.0,
+                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,   0.01,    0.0,
+                                   0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,  0.015]

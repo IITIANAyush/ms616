@@ -156,7 +156,7 @@ def generate_launch_description():
         arguments=[
             "-topic", "robot_description",
             "-name", "ms616",
-            "-z", "0.05",
+            "x","-0.2","y","0.2","-z", "0.05",
         ],
         output="screen",
     )
@@ -188,7 +188,12 @@ def generate_launch_description():
         )
     )
 
-    # ros_gz bridge: sim clock, lidar scan, cmd_vel.
+    # ros_gz bridge: sim clock, lidar scan.
+    # (cmd_vel is NOT bridged here: this robot is actuated via
+    # ign_ros2_control/IgnitionSystem + diff_drive_controller, a real
+    # ros2_control controller — not Gazebo's native diff-drive plugin.
+    # Bridging /cmd_vel to ignition.msgs.Twist would publish into a
+    # Gazebo-side topic nothing subscribes to.)
     # Using ignition.msgs.* (Fortress-native) rather than gz.msgs.* —
     # the ros_gz_bridge build paired with Fortress expects this naming.
     gz_bridge = Node(
@@ -197,15 +202,18 @@ def generate_launch_description():
         arguments=[
             "/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock",
             "/model/ms616/sensor/lidar_2d/scan@sensor_msgs/msg/LaserScan[ignition.msgs.LaserScan",
-            "/cmd_vel@geometry_msgs/msg/Twist]ignition.msgs.Twist",
+            # NEW — bridges the IMU sensor. Confirmed via `ign topic -l`
+            # that Gazebo publishes this on the plain topic /imu (not a
+            # namespaced /model/... path — see note above).
+            "/imu@sensor_msgs/msg/Imu[ignition.msgs.IMU",
         ],
         remappings=[
             ("/model/ms616/sensor/lidar_2d/scan", "/scan"),
+            ("/imu", "/imu/data_raw"),
         ],
         output="screen",
         parameters=[{"use_sim_time": use_sim_time}],
     )
-
     return LaunchDescription(
         [
             declare_world,
