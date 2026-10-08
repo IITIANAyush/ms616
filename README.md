@@ -2,9 +2,23 @@
 
 This package now has one canonical autonomous-navigation entry point:
 
+
+## random useful tools: 
 ```bash
+tmux #on Rpi's ssh terminal then do ctrl+B % to split terminal horizontally
+```
+detach using Ctrl + B then D
+
+
+```
+ssh strawberry@strawberry-desktop.local
+```
+
+```bash
+conda deactivate
 ros2 launch ms616 gazebo.launch.py
 ros2 launch ms616 dynamic_nav.launch.py
+cd ~/ros2_ws
 ```
 
 The Gazebo launch starts the MS616 robot, LiDAR, IMU, ros2_control, and two
@@ -14,7 +28,6 @@ minimal Nav2 stack, the dynamic-obstacle predictor, and frontier exploration.
 ## 1. Build
 
 ```bash
-cd ~/ros2_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install --packages-select ms616
 source install/setup.bash
@@ -25,8 +38,6 @@ source install/setup.bash
 Terminal 1:
 
 ```bash
-source /opt/ros/humble/setup.bash
-source ~/ros2_ws/install/setup.bash
 ros2 launch ms616 gazebo.launch.py
 ```
 

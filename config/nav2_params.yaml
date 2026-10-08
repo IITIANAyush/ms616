@@ -83,18 +83,13 @@ local_costmap:
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
-<<<<<<< HEAD
         observation_sources: scan dynamic_prediction
-=======
-        observation_sources: scan
->>>>>>> origin/main
         scan:
           topic: /scan
           max_obstacle_height: 2.0
           clearing: true
           marking: true
           data_type: "LaserScan"
-<<<<<<< HEAD
         dynamic_prediction:
           topic: /dynamic_obstacles/predicted_points
           max_obstacle_height: 0.40
@@ -106,8 +101,6 @@ local_costmap:
           clearing: false
           marking: true
           data_type: "PointCloud2"
-=======
->>>>>>> origin/main
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 4.0
@@ -226,8 +219,4 @@ collision_monitor:
       polygon_pub_topic: /collision_monitor/stop_zone
     base_frame_id: base_link
     cmd_vel_in_topic: /diff_drive_controller/cmd_vel_unstamped
-<<<<<<< HEAD
     cmd_vel_out_topic: /diff_drive_controller/cmd_vel_unstamped
-=======
-    cmd_vel_out_topic: /diff_drive_controller/cmd_vel_unstamped
->>>>>>> origin/main

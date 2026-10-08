@@ -31,7 +31,6 @@ install(PROGRAMS
   RENAME object_detector
 )
 
-<<<<<<< HEAD
 install(PROGRAMS
   auto_controller/dynamic_obstacle_manager.py
   DESTINATION lib/${PROJECT_NAME}
@@ -45,6 +44,3 @@ install(PROGRAMS
 )
 
 ament_package()
-=======
-ament_package()
->>>>>>> origin/main

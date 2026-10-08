@@ -184,7 +184,6 @@ def generate_launch_description():
     )
 
     rviz_node = Node(
-<<<<<<< HEAD
         package="rviz2",
         executable="rviz2",
         name="rviz2",
@@ -203,12 +202,6 @@ def generate_launch_description():
             {"world_name": "ms616_default"},
         ],
         condition=IfCondition(dynamic_obstacles),
-=======
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
-        parameters=[{'use_sim_time': True}]
->>>>>>> origin/main
     )
 
     joint_state_broadcaster_spawner = Node(
@@ -249,10 +242,7 @@ def generate_launch_description():
             # that Gazebo publishes this on the plain topic /imu (not a
             # namespaced /model/... path — see note above).
             "/imu@sensor_msgs/msg/Imu[ignition.msgs.IMU",
-<<<<<<< HEAD
             "/world/ms616_default/set_pose@ros_gz_interfaces/srv/SetEntityPose",
-=======
->>>>>>> origin/main
         ],
         remappings=[
             ("/model/ms616/sensor/lidar_2d/scan", "/scan"),
@@ -260,29 +250,20 @@ def generate_launch_description():
         ],
         output="screen",
         parameters=[{"use_sim_time": use_sim_time}],
-    )
-    return LaunchDescription(
-        [
+    
+        return LaunchDescription(
+            [
             declare_world,
             declare_use_sim_time,
-<<<<<<< HEAD
             declare_dynamic_obstacles,
             declare_rviz,
-=======
->>>>>>> origin/main
             robot_state_publisher_node,
             gz_server,
             gz_gui,
             spawn_entity,
             delayed_controllers,
             gz_bridge,
-<<<<<<< HEAD
             dynamic_obstacle_manager,
             rviz_node,
         ]
     )
-=======
-            rviz_node,
-        ]
-    )
->>>>>>> origin/main
