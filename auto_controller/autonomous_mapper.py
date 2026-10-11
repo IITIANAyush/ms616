@@ -39,6 +39,7 @@ from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 
 from nav_msgs.msg import OccupancyGrid
 from nav2_msgs.action import NavigateToPose
+from std_msgs.msg import Bool
 
 import tf2_ros
 
@@ -93,6 +94,7 @@ class AutonomousMapper(Node):
 
         self.latest_map = None
         self.goal_active = False
+        self.manual_override_active = False
         self.exploration_done = False
         # Frontiers Nav2 has already failed to reach — list of (x, y)
         # world coords. A new candidate within blacklist_radius of any
@@ -105,6 +107,15 @@ class AutonomousMapper(Node):
 
         self.map_sub = self.create_subscription(
             OccupancyGrid, self.map_topic, self.map_callback, map_qos
+        )
+
+        override_qos = QoSProfile(depth=1)
+        override_qos.durability = QoSDurabilityPolicy.TRANSIENT_LOCAL
+        self.override_sub = self.create_subscription(
+            Bool,
+            "/cmd_vel_mux/manual_override_active",
+            self.manual_override_callback,
+            override_qos,
         )
 
         self.tf_buffer = tf2_ros.Buffer()
@@ -122,6 +133,16 @@ class AutonomousMapper(Node):
     # ------------------------------------------------------------------
     def map_callback(self, msg: OccupancyGrid):
         self.latest_map = msg
+
+    def manual_override_callback(self, msg: Bool):
+        self.manual_override_active = bool(msg.data)
+        if self.manual_override_active:
+            self.get_logger().warn(
+                "Manual override active; pausing frontier-goal generation until AUTO is restored.",
+                throttle_duration_sec=2.0,
+            )
+        else:
+            self.get_logger().info("Manual override released; frontier exploration may resume.")
 
     def get_robot_pose(self):
         """Return (x, y) of the robot in the global (map) frame, or None."""
@@ -342,6 +363,10 @@ class AutonomousMapper(Node):
 
     # ------------------------------------------------------------------
     def explore_step(self):
+        # cmd_vel_mux also requests cancellation of the active Nav2 goal when
+        # manual mode is entered. Do not issue fresh frontier goals meanwhile.
+        if self.manual_override_active:
+            return
         if self.exploration_done or self.goal_active:
             return
 
@@ -419,7 +444,8 @@ class AutonomousMapper(Node):
         # 4 = SUCCEEDED, 5 = CANCELED, 6 = ABORTED
         status = result.status if result is not None else None
 
-        if status is not None and status != 4 and self.current_goal is not None:
+        if (status is not None and status != 4 and self.current_goal is not None
+                and not self.manual_override_active):
             # The goal did NOT succeed (aborted, e.g. "Failed to make
             # progress", planner failure, etc.) — blacklist it so we
             # never re-select this same unreachable spot again. This

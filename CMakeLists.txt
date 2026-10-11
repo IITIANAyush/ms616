@@ -49,4 +49,10 @@ install(PROGRAMS
   RENAME terminal_goal
 )
 
+install(PROGRAMS
+  auto_controller/cmd_vel_mux.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME cmd_vel_mux
+)
+
 ament_package()

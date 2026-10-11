@@ -7,7 +7,7 @@ Pipeline:
         -> Cartographer SLAM -> /map + map->odom
         -> Nav2 global planner (SmacPlanner2D)
         -> Nav2 local controller (DWB)
-        -> /diff_drive_controller/cmd_vel_unstamped
+        -> /nav_cmd_vel -> cmd_vel_mux -> /diff_drive_controller/cmd_vel_unstamped
 
 Dynamic obstacle layer:
   /scan -> dynamic_obstacle_tracker -> /dynamic_obstacles/predicted_points
@@ -111,9 +111,7 @@ def generate_launch_description():
             name="controller_server",
             output="screen",
             parameters=[nav2_params, {"use_sim_time": use_sim_time}],
-            remappings=[
-                ("cmd_vel", "/diff_drive_controller/cmd_vel_unstamped"),
-            ],
+            remappings=[("cmd_vel", "/nav_cmd_vel")],
         ),
         Node(
             package="nav2_planner",
@@ -128,9 +126,7 @@ def generate_launch_description():
             name="behavior_server",
             output="screen",
             parameters=[nav2_params, {"use_sim_time": use_sim_time}],
-            remappings=[
-                ("cmd_vel", "/diff_drive_controller/cmd_vel_unstamped"),
-            ],
+            remappings=[("cmd_vel", "/nav_cmd_vel")],
         ),
         Node(
             package="nav2_bt_navigator",
@@ -156,6 +152,16 @@ def generate_launch_description():
                     ]
                 },
             ],
+        ),
+
+        # ---------------- Safe velocity selection ----------------
+        # Only this mux publishes to the physical diff-drive command topic.
+        Node(
+            package="ms616",
+            executable="cmd_vel_mux",
+            name="cmd_vel_mux",
+            output="screen",
+            parameters=[{"use_sim_time": use_sim_time}],
         ),
 
         # ---------------- Frontier exploration ----------------

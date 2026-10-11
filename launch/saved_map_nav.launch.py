@@ -61,7 +61,7 @@ def generate_launch_description():
         name="controller_server",
         output="screen",
         parameters=[params_file, {"use_sim_time": use_sim_time}],
-        remappings=[("cmd_vel", "/diff_drive_controller/cmd_vel_unstamped")],
+        remappings=[("cmd_vel", "/nav_cmd_vel")],
     )
     planner = Node(
         package="nav2_planner",
@@ -76,7 +76,7 @@ def generate_launch_description():
         name="behavior_server",
         output="screen",
         parameters=[params_file, {"use_sim_time": use_sim_time}],
-        remappings=[("cmd_vel", "/diff_drive_controller/cmd_vel_unstamped")],
+        remappings=[("cmd_vel", "/nav_cmd_vel")],
     )
     navigator = Node(
         package="nav2_bt_navigator",
@@ -99,6 +99,11 @@ def generate_launch_description():
         }],
     )
 
+    cmd_vel_mux = Node(
+        package="ms616", executable="cmd_vel_mux", name="cmd_vel_mux", output="screen",
+        parameters=[{"use_sim_time": use_sim_time}],
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument("use_sim_time", default_value="true"),
         DeclareLaunchArgument(
@@ -111,11 +116,11 @@ def generate_launch_description():
         amcl,
         localization_lifecycle,
         GroupAction(actions=[
-            SetRemap(src="/cmd_vel", dst="/diff_drive_controller/cmd_vel_unstamped"),
             controller,
             planner,
             behaviors,
             navigator,
             navigation_lifecycle,
         ]),
+        cmd_vel_mux,
     ])

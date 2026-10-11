@@ -45,11 +45,11 @@ colcon list | grep '^ms616 '
 
 ## 2. Recommended workflow: map once, then navigate using the saved map
 
-### Phase A — map the environment without dynamic obstacles
+### Phase A — automatically explore and map without moving obstacles
 
-Use three terminals.
+No manual driving is needed for normal mapping. The frontier explorer sends goals to Nav2, which moves the robot to the boundary between known free space and unexplored space. The mapping world has no moving obstacle models.
 
-**Terminal 1 — Gazebo and RViz, with a static mapping world:**
+**Terminal 1 — Gazebo + RViz, static world:**
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -57,9 +57,7 @@ source ~/ros2_ws/install/setup.bash
 ros2 launch ms616 mapping_gazebo.launch.py
 ```
 
-This launches Gazebo with `worlds/mapping_world.sdf` and disables the moving-obstacle manager. RViz starts by default.
-
-**Terminal 2 — EKF + Cartographer mapping:**
+**Terminal 2 — EKF + Cartographer + Nav2 + autonomous frontier exploration:**
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -67,40 +65,40 @@ source ~/ros2_ws/install/setup.bash
 ros2 launch ms616 mapping.launch.py
 ```
 
-This starts the robot-localization EKF, Cartographer, and the occupancy-grid publisher. The EKF fuses wheel odometry and IMU data; Cartographer uses LiDAR, IMU, and filtered odometry to construct the map.
+`autonomous_explore:=true` is the default. The robot explores automatically, while the EKF fuses wheel odometry and IMU, and Cartographer uses the filtered odometry, IMU and LiDAR scans to build `/map`. To debug the stack without automatic exploration, use `autonomous_explore:=false`; this is not the normal workflow.
 
-**Terminal 3 — drive the robot manually to scan the environment:**
-
-```bash
-source /opt/ros/humble/setup.bash
-source ~/ros2_ws/install/setup.bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard \
-  --ros-args -r cmd_vel:=/diff_drive_controller/cmd_vel_unstamped
-```
-
-Drive slowly through all areas you want to map. Watch the `/map` and `/scan` displays in RViz. Avoid moving objects during this mapping phase so the saved map represents the static environment.
-
-Check that the map is being published:
-
-```bash
-ros2 topic echo /map --once
-```
-
-When the map is satisfactory, stop teleop with `Ctrl+C` but leave the mapping launch running. Save the map before stopping Cartographer:
+Wait for the `autonomous_mapper` log saying `No frontiers left — exploration complete.` The map may still be refining for a few seconds; then save it:
 
 ```bash
 mkdir -p ~/ros2_ws/maps
 ros2 run nav2_map_server map_saver_cli -f ~/ros2_ws/maps/ms616_map
 ```
 
-After the map saver finishes, you can stop the mapping launch with `Ctrl+C`. The map saver should create:
+This creates `~/ros2_ws/maps/ms616_map.yaml` and `~/ros2_ws/maps/ms616_map.pgm`. Keep both files because the YAML references the image. Once saved, stop the mapping stack with `Ctrl+C` before starting the saved-map navigation workflow.
 
-```text
-~/ros2_ws/maps/ms616_map.yaml
-~/ros2_ws/maps/ms616_map.pgm
+#### Manual safety override while mapping
+
+Automatic exploration is the default. To temporarily take control, enable the software override first:
+
+```bash
+ros2 service call /cmd_vel_mux/set_manual_override std_srvs/srv/SetBool "{data: true}"
 ```
 
-Keep both files. The YAML references the image file.
+Then start keyboard teleoperation in a third terminal:
+
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/manual_cmd_vel
+```
+
+If the keyboard package is missing, install it once with `sudo apt install ros-humble-teleop-twist-keyboard`. Hold the usual movement keys (`i`, `,`, `j`, `l`, etc. as printed by the teleop node); press `k` to command stop. While override is active, Nav2 velocity commands are blocked, stale keyboard commands time out to zero, the active Nav2 goal is requested to cancel, and `autonomous_mapper` pauses issuing new frontier goals.
+
+To return to automated frontier exploration, stop teleop with `Ctrl+C`, then release the override:
+
+```bash
+ros2 service call /cmd_vel_mux/set_manual_override std_srvs/srv/SetBool "{data: false}"
+```
+
+The frontier explorer resumes and chooses a goal based on the robot's current pose and map. This is a **software override**, not a certified emergency stop; physical robots still need a hardware E-stop.
 
 ### Phase B — start fresh and localize in the saved map
 
@@ -166,6 +164,9 @@ ros2 topic echo /scan --once
 
 The action `/navigate_to_pose` should exist and `controller_server` / `amcl` should become `active`. If localization looks wrong, reinitialize with **2D Pose Estimate** before changing planner settings.
 
+Manual safety override also works in saved-map navigation. Enable `/cmd_vel_mux/set_manual_override` as described above and run `teleop_twist_keyboard` remapped to `/manual_cmd_vel`. Enabling it requests cancellation of the current Nav2 goal; after releasing the override, send a fresh goal from RViz or the terminal goal sender.
+
+
 ## 3. Experimental workflow: online SLAM + frontier exploration
 
 This is the older workflow where the robot builds a map while Nav2 explores. It is useful for testing frontier exploration and the optional moving-obstacle predictor, but it combines more components and is not the recommended routine navigation mode.
@@ -219,6 +220,12 @@ Nav2 local costmap
 DWB local controller
   |
   v
+/nav_cmd_vel
+  |
+  v
+cmd_vel_mux  <--- /manual_cmd_vel when manual override is enabled
+  |
+  v
 /diff_drive_controller/cmd_vel_unstamped
 ```
 
@@ -249,7 +256,10 @@ For the saved-map workflow, focus on:
 /plan
 /local_costmap/costmap
 /global_costmap/costmap
+/nav_cmd_vel
+/manual_cmd_vel
 /diff_drive_controller/cmd_vel_unstamped
+/cmd_vel_mux/manual_override_active
 ```
 
 Core nodes include `ekf_filter_node`, `map_server`, `amcl`, `planner_server`, `controller_server`, `behavior_server`, `bt_navigator`, and the lifecycle managers. In online-SLAM mode, also expect `cartographer_node`, `cartographer_occupancy_grid_node`, and optionally `dynamic_obstacle_tracker` and `autonomous_mapper`.
@@ -259,6 +269,7 @@ The RQT graph may still look large because ROS 2 actions, lifecycle management, 
 ## 7. Important cautions
 
 - Do not run the old independent `obstacle_avoidance.py` / VFH controller at the same time as Nav2. Both can publish velocity commands and fight each other.
+- All automated launches route Nav2 commands through `cmd_vel_mux`. Do not remap teleop directly to `/diff_drive_controller/cmd_vel_unstamped`; manual teleop must publish to `/manual_cmd_vel` and the override service must be enabled first.
 - Ensure simulation time is enabled for every node in Gazebo/RViz workflows. The launch files default to `use_sim_time:=true`. Avoid starting a second RViz instance without `use_sim_time` enabled.
 - Run only one navigation stack at a time. Stop `dynamic_nav.launch.py` before starting `saved_map_nav.launch.py`, and vice versa.
 - The standard local costmap reacts to current obstacle observations; predictive moving-obstacle avoidance is only enabled in the online-SLAM `dynamic_nav.launch.py` workflow in this patch.
