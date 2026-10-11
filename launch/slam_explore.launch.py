@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-<<<<<<< HEAD
-"""Backward-compatible wrapper for dynamic_nav.launch.py."""
-=======
 """
 slam_explore_clean.launch.py
 
@@ -16,32 +13,20 @@ odom -> base_link for this test.
 
 Run after gazebo.launch.py.
 """
->>>>>>> origin/main
 
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-<<<<<<< HEAD
-from launch.actions import IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-=======
 from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, SetRemap
->>>>>>> origin/main
 
 
 def generate_launch_description():
     pkg_share = get_package_share_directory("ms616")
-<<<<<<< HEAD
-    launch_file = PythonLaunchDescriptionSource(
-        os.path.join(pkg_share, "launch", "dynamic_nav.launch.py")
-    )
-    return LaunchDescription([IncludeLaunchDescription(launch_file)])
-=======
 
     nav2_params_file = os.path.join(pkg_share, "config", "nav2_params.yaml")
     cartographer_config_dir = os.path.join(pkg_share, "config")
@@ -129,4 +114,3 @@ def generate_launch_description():
         nav2_launch,
         autonomous_mapper_node,
     ])
->>>>>>> origin/main

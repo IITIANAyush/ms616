@@ -4,13 +4,18 @@ This package now has one canonical autonomous-navigation entry point:
 
 
 ## random useful tools: 
+
 ```bash
 tmux #on Rpi's ssh terminal then do ctrl+B % to split terminal horizontally
 ```
 detach using Ctrl + B then D
 
-
+```bash
+ping strawberry-desktop.local
 ```
+
+
+```bash
 ssh strawberry@strawberry-desktop.local
 ```
 
