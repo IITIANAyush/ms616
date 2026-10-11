@@ -43,6 +43,61 @@ If `colcon` reports duplicate package names, check that there is only one `ms616
 colcon list | grep '^ms616 '
 ```
 
+## Kinematic-model validation against Gazebo
+
+Before tuning MPC or changing caster/contact physics, run repeatable open-loop trials and compare three predictions against Gazebo world-pose ground truth. The trial model uses the current Gazebo parameters: wheel radius `0.035 m` and wheel separation `0.21 m`. The older pygame prototype used `0.065 m`, which does **not** match this URDF/controller and would over-predict translation for a given wheel rate.
+
+**Important: run this experiment with Gazebo only.** Stop `mapping.launch.py`, `dynamic_nav.launch.py`, Nav2, teleop, VFH, and any other command publisher first. The validator sends velocity commands directly to `/diff_drive_controller/cmd_vel_unstamped`. Keep a clear space and use `dynamic_obstacles:=false`.
+
+Terminal 1 — Gazebo and the robot only:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch ms616 gazebo.launch.py dynamic_obstacles:=false rviz:=false
+```
+
+Terminal 2 — bridge Gazebo world poses and run the automated trials:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch ms616 validate_kinematics.launch.py
+```
+
+The test runs these profiles automatically, with ramp-up/ramp-down and a stop between cases:
+
+1. Straight line (`v=0.16 m/s`, `w=0`).
+2. Constant-curvature left arc (`v=0.13 m/s`, `w=0.40 rad/s`).
+3. In-place rotation (`v=0`, `w=0.55 rad/s`).
+
+The logger writes a timestamped CSV and a JSON summary to `~/ros2_ws/logs/`. It logs commands, measured wheel-joint rates, `/diff_drive_controller/odom`, and Gazebo world-pose ground truth. The wheel-rate kinematic model is integrated from measured left/right wheel rates; this is the important comparison for separating wheel/contact slip from actuator lag.
+
+After the three cases finish, analyze the CSV (replace the path with the printed filename):
+
+```bash
+ros2 run ms616 analyze_kinematic_log ~/ros2_ws/logs/kinematic_validation_YYYYMMDD_HHMMSS.csv
+```
+
+The analyzer prints position/yaw RMSE and, if `matplotlib` is installed, produces one PNG per test. Use `--no-plot` for text-only analysis. Check the summary JSON alongside the plots.
+
+Interpretation:
+
+- Large **command-model vs Gazebo** error, but small **measured-wheel-model vs Gazebo** error: suspect command/actuation lag or velocity limits.
+- Large **measured-wheel-model vs Gazebo** error: suspect wheel slip, inaccurate wheel radius/track width, or wheel/caster contact friction.
+- Encoder odometry and the measured-wheel model agree with each other but drift from Gazebo pose: strong evidence of physical slip, because encoder odometry cannot observe wheel-ground slip.
+- Straight-line motion matches but curved/rotation trials diverge: investigate effective track width and caster scrubbing/contact before adjusting the model.
+
+The Gazebo ground-truth bridge subscribes to `/world/ms616_default/dynamic_pose/info`. If the node waits for ground truth, check the actual world name with `ign topic -l | grep dynamic_pose/info`; pass the correct topic, e.g. `ground_truth_topic:=/world/<world_name>/dynamic_pose/info`, to the launch.
+
+The pygame prototype remains available as an ideal-model visualizer (it is **not** a Gazebo test). Run it from the source tree:
+
+```bash
+python3 ~/ros2_ws/src/ms616/kinematic_simulation/Kinematic_simulation.py
+```
+
+Press `1` for straight line, `2` for a constant-curvature arc, `3` for in-place rotation, and `W/S/A/D` for manual ideal-model control.
+
 ## 2. Recommended workflow: map once, then navigate using the saved map
 
 ### Phase A — automatically explore and map without moving obstacles

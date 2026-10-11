@@ -6,7 +6,7 @@ find_package(ament_cmake_python REQUIRED)
 find_package(rclpy REQUIRED)
 
 install(
-  DIRECTORY urdf launch rviz meshes config worlds
+  DIRECTORY urdf launch rviz meshes config worlds kinematic_simulation
   DESTINATION share/${PROJECT_NAME}
 )
 
@@ -53,6 +53,23 @@ install(PROGRAMS
   auto_controller/cmd_vel_mux.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME cmd_vel_mux
+)
+
+# Automated kinematic model validation and offline analysis. Keep the
+# ROS-independent model module beside the installed executable so imports work.
+install(PROGRAMS
+  auto_controller/kinematic_validation_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME kinematic_validation_node
+)
+install(FILES
+  auto_controller/kinematic_model.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+install(PROGRAMS
+  auto_controller/analyze_kinematic_log.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME analyze_kinematic_log
 )
 
 ament_package()

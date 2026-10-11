@@ -21,7 +21,7 @@ Controls (continuous, hold-to-move):
 
 Robot dimensions (from mechanical drawing):
     Chassis footprint : 242.8 mm x 149.78 mm  (drawn as a rectangle)
-    Wheel radius r     : 0.065 m  (130 mm dia, matches the kinematic doc)
+    Wheel radius r     : 0.035 m  (matches the current Gazebo URDF/controller)
     Track width 2L     : 0.210 m  (matches wheel_L = 0.105 m in the URDF)
 
 This is a pure kinematic simulation (no dynamics, no slip, no motor lag
@@ -37,14 +37,17 @@ import pygame
 # ============================================================
 # ROBOT / SIM PARAMETERS
 # ============================================================
-WHEEL_RADIUS = 0.065        # r, meters (130 mm dia wheel)
+# These must match the Gazebo model when using this GUI as a visual reference.
+# NOTE: the earlier trial value 0.065 m conflicted with both URDF and
+# diff_drive_controller.yaml, which use 0.035 m (70 mm diameter).
+WHEEL_RADIUS = 0.035        # r, meters; matches URDF/controller config
 TRACK_HALF_WIDTH = 0.105    # L, meters (2L = 210 mm track width)
 
 CHASSIS_LENGTH = 0.2428     # meters (242.8 mm, from drawing)
 CHASSIS_WIDTH = 0.14978     # meters (149.78 mm, from drawing)
 
 MAX_LINEAR_VEL = 0.6        # m/s, cap on v
-MAX_ANGULAR_VEL = 3.0       # rad/s, cap on w
+MAX_ANGULAR_VEL = 2.0       # rad/s, matches diff_drive_controller limit
 LINEAR_ACCEL = 1.2          # m/s^2, how fast v ramps toward target when a key is held
 ANGULAR_ACCEL = 6.0         # rad/s^2, how fast w ramps toward target
 VEL_DECAY = 3.0             # how fast v/w decay toward 0 when no key held (per second)
@@ -55,6 +58,14 @@ TRAIL_FADE_TIME = 8.0       # seconds before a trail point fully fades out
 
 WINDOW_W, WINDOW_H = 1000, 750
 FPS = 60
+
+# Press 1/2/3 to replay an ideal kinematic trajectory. These same command
+# profiles are exercised against Gazebo by validate_kinematics.launch.py.
+TEST_PRESETS = {
+    pygame.K_1: {"name": "Straight line", "v": 0.16, "w": 0.0, "ramp": 0.60, "hold": 2.8},
+    pygame.K_2: {"name": "Constant-curvature left", "v": 0.13, "w": 0.40, "ramp": 0.60, "hold": 3.8},
+    pygame.K_3: {"name": "In-place rotation", "v": 0.0, "w": 0.55, "ramp": 0.50, "hold": 3.8},
+}
 
 BG_COLOR = (245, 245, 248)
 GRID_COLOR = (222, 222, 228)
@@ -80,9 +91,46 @@ class RobotState:
         self.v_target = 0.0
         self.w_target = 0.0
         self.trail = []     # list of (x, y, timestamp)
+        self.preset = None
+        self.preset_elapsed = 0.0
+        self.mode_label = "Manual"
 
     def reset(self):
         self.__init__()
+
+    def start_preset(self, profile):
+        self.reset()
+        self.preset = dict(profile)
+        self.preset_elapsed = 0.0
+        self.mode_label = f"Preset: {profile['name']}"
+
+    def step_preset(self, dt, sim_time):
+        if self.preset is None:
+            return
+        self.preset_elapsed += dt
+        ramp = self.preset["ramp"]
+        hold = self.preset["hold"]
+        t = self.preset_elapsed
+        total = 2.0 * ramp + hold
+        if t < ramp:
+            f = t / ramp if ramp else 1.0
+            fwd, turn, phase = self.preset["v"] * f, self.preset["w"] * f, "ramp up"
+        elif t < ramp + hold:
+            fwd, turn, phase = self.preset["v"], self.preset["w"], "hold"
+        elif t < total:
+            f = max(0.0, 1.0 - (t - ramp - hold) / ramp) if ramp else 0.0
+            fwd, turn, phase = self.preset["v"] * f, self.preset["w"] * f, "ramp down"
+        else:
+            self.v = self.w = self.v_target = self.w_target = 0.0
+            self.mode_label = f"Completed: {self.preset['name']}"
+            self.preset = None
+            return
+
+        self.v_target, self.w_target = fwd, turn
+        self._ramp_toward("v", self.v_target, LINEAR_ACCEL, dt)
+        self._ramp_toward("w", self.w_target, ANGULAR_ACCEL, dt)
+        self._integrate_pose(dt, sim_time)
+        self.mode_label = f"Preset: {self.preset['name']} ({phase})"
 
     def wheel_speeds(self):
         """Inverse kinematics: (v, w) -> (wL, wR) in rad/s, matches Eq. 13 of the doc."""
@@ -111,17 +159,27 @@ class RobotState:
         self.v = max(-MAX_LINEAR_VEL, min(MAX_LINEAR_VEL, self.v))
         self.w = max(-MAX_ANGULAR_VEL, min(MAX_ANGULAR_VEL, self.w))
 
-        # Forward kinematics (Eq. 8 / 10-12 of the kinematic model doc)
-        self.x += self.v * math.cos(self.theta) * dt
-        self.y += self.v * math.sin(self.theta) * dt
-        self.theta += self.w * dt
-        self.theta = math.atan2(math.sin(self.theta), math.cos(self.theta))  # wrap to [-pi, pi]
+        self._integrate_pose(dt, sim_time)
+
+    def _integrate_pose(self, dt, sim_time):
+        # Forward kinematics for the differential-drive unicycle model.
+        # This is an ideal, slip-free illustration; Gazebo validation is logged
+        # separately by kinematic_validation_node.py.
+        if dt > 0.0:
+            if abs(self.w) < 1e-8:
+                self.x += self.v * math.cos(self.theta) * dt
+                self.y += self.v * math.sin(self.theta) * dt
+            else:
+                next_theta = self.theta + self.w * dt
+                self.x += (self.v / self.w) * (math.sin(next_theta) - math.sin(self.theta))
+                self.y -= (self.v / self.w) * (math.cos(next_theta) - math.cos(self.theta))
+                self.theta = next_theta
+            self.theta = math.atan2(math.sin(self.theta), math.cos(self.theta))
 
         # Trail bookkeeping
         self.trail.append((self.x, self.y, sim_time))
         if len(self.trail) > TRAIL_MAX_POINTS:
             self.trail.pop(0)
-        # drop points older than TRAIL_FADE_TIME
         cutoff = sim_time - TRAIL_FADE_TIME
         while self.trail and self.trail[0][2] < cutoff:
             self.trail.pop(0)
@@ -267,7 +325,8 @@ def draw_hud(surface, font, state):
         f"v = {state.v:+.3f} m/s    w = {state.w:+.3f} rad/s",
         f"wheel_L = {wL:+.2f} rad/s    wheel_R = {wR:+.2f} rad/s",
         "",
-        "W/S: linear vel   A/D: angular vel   SPACE: stop   R: reset   ESC/Q: quit",
+        f"Mode: {state.mode_label}",
+        "1: straight  2: curve  3: rotate | Manual W/S A/D | SPACE stop | R reset | ESC quit",
     ]
     hud_surf = pygame.Surface((560, 20 + 22 * len(lines)), pygame.SRCALPHA)
     hud_surf.fill(HUD_BG)
@@ -308,6 +367,10 @@ def main():
                     state.reset()
                 elif event.key == pygame.K_SPACE:
                     state.stop()
+                    state.preset = None
+                    state.mode_label = "Stopped (manual mode)"
+                elif event.key in TEST_PRESETS:
+                    state.start_preset(TEST_PRESETS[event.key])
 
         keys = pygame.key.get_pressed()
         forward_input = 0
@@ -322,7 +385,10 @@ def main():
         if keys[pygame.K_d]:
             turn_input -= 1
 
-        state.step(dt, forward_input, turn_input, sim_time)
+        if state.preset is not None:
+            state.step_preset(dt, sim_time)
+        else:
+            state.step(dt, forward_input, turn_input, sim_time)
 
         # camera follows the robot, centered
         cam_x, cam_y = state.x, state.y
