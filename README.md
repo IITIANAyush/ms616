@@ -1,228 +1,268 @@
-# MS616 — SLAM + Nav2 + Dynamic Obstacle Avoidance
+# MS616 — SLAM, Saved-Map Navigation, and Dynamic Obstacle Avoidance
 
-This package now has one canonical autonomous-navigation entry point:
+This package provides two navigation workflows:
 
+1. **Recommended: staged navigation.** Map the static environment with dynamic obstacles disabled, save the map, then restart in saved-map localization mode and send goals from a terminal or RViz.
+2. **Experimental: online SLAM + frontier exploration.** Continue mapping while Nav2 explores frontiers; an optional LiDAR-based predictor adds short-horizon predictions of moving obstacles.
 
-## random useful tools: 
+The staged workflow is easier to debug because mapping and navigation are separate. Use one workflow at a time; do not launch both navigation stacks simultaneously.
 
-```bash
-tmux #on Rpi's ssh terminal then do ctrl+B % to split terminal horizontally
-```
-detach using Ctrl + B then D
-
-```bash
-ping strawberry-desktop.local
-```
-
+## Useful shell commands
 
 ```bash
-ssh strawberry@strawberry-desktop.local
-```
-
-```bash
+# Leave Conda environments before using the ROS Python environment
 conda deactivate
-ros2 launch ms616 gazebo.launch.py
-ros2 launch ms616 dynamic_nav.launch.py
+
+# Workspace
 cd ~/ros2_ws
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+
+# Raspberry Pi SSH helpers
+ping strawberry-desktop.local
+ssh strawberry@strawberry-desktop.local
+
+# tmux over SSH: split pane with Ctrl+B then %, detach with Ctrl+B then D
+tmux
 ```
 
-The Gazebo launch starts the MS616 robot, LiDAR, IMU, ros2_control, and two
-moving collision obstacles. The navigation launch starts Cartographer, a
-minimal Nav2 stack, the dynamic-obstacle predictor, and frontier exploration.
+## 1. Build the package
 
-## 1. Build
+Run from the workspace root:
 
 ```bash
+cd ~/ros2_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install --packages-select ms616
 source install/setup.bash
 ```
 
-## 2. Run Gazebo + moving obstacles
-
-Terminal 1:
+If `colcon` reports duplicate package names, check that there is only one `ms616` package under `~/ros2_ws/src`. Keep backups outside `src/` so colcon does not discover them as packages:
 
 ```bash
-ros2 launch ms616 gazebo.launch.py
+colcon list | grep '^ms616 '
 ```
 
-By default this starts:
+## 2. Recommended workflow: map once, then navigate using the saved map
 
-- two dynamic obstacle models in `worlds/default_world.sdf`
-- `dynamic_obstacle_manager`, which moves those models through Gazebo's
-  `/world/ms616_default/set_pose` service
-- the normal `/scan` and `/imu/data_raw` bridges
+### Phase A — map the environment without dynamic obstacles
 
-Useful options:
+Use three terminals.
 
-```bash
-# Start without moving obstacles
-ros2 launch ms616 gazebo.launch.py dynamic_obstacles:=false
-
-# Start RViz from the Gazebo launch as well
-ros2 launch ms616 gazebo.launch.py rviz:=true
-```
-
-Verify the simulator side first:
-
-```bash
-ros2 topic echo /scan --once
-ros2 service list | grep /world/ms616_default/set_pose
-```
-
-## 3. Run navigation
-
-Terminal 2:
+**Terminal 1 — Gazebo and RViz, with a static mapping world:**
 
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
-ros2 launch ms616 dynamic_nav.launch.py
+ros2 launch ms616 mapping_gazebo.launch.py
 ```
 
-For mapping / Nav2 without autonomous frontier exploration:
+This launches Gazebo with `worlds/mapping_world.sdf` and disables the moving-obstacle manager. RViz starts by default.
+
+**Terminal 2 — EKF + Cartographer mapping:**
 
 ```bash
-ros2 launch ms616 dynamic_nav.launch.py autonomous_explore:=false
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch ms616 mapping.launch.py
 ```
 
-To disable the prediction layer and compare against plain Nav2 local-costmap
-avoidance:
+This starts the robot-localization EKF, Cartographer, and the occupancy-grid publisher. The EKF fuses wheel odometry and IMU data; Cartographer uses LiDAR, IMU, and filtered odometry to construct the map.
+
+**Terminal 3 — drive the robot manually to scan the environment:**
 
 ```bash
-ros2 launch ms616 dynamic_nav.launch.py dynamic_avoidance:=false
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard \
+  --ros-args -r cmd_vel:=/diff_drive_controller/cmd_vel_unstamped
 ```
 
-## 4. What the new dynamic-avoidance layer does
+Drive slowly through all areas you want to map. Watch the `/map` and `/scan` displays in RViz. Avoid moving objects during this mapping phase so the saved map represents the static environment.
 
-The implementation is inspired by the linked Nav2 dynamic-obstacle project:
+Check that the map is being published:
+
+```bash
+ros2 topic echo /map --once
+```
+
+When the map is satisfactory, stop teleop with `Ctrl+C` but leave the mapping launch running. Save the map before stopping Cartographer:
+
+```bash
+mkdir -p ~/ros2_ws/maps
+ros2 run nav2_map_server map_saver_cli -f ~/ros2_ws/maps/ms616_map
+```
+
+After the map saver finishes, you can stop the mapping launch with `Ctrl+C`. The map saver should create:
 
 ```text
-                 /scan
-                   |
-                   v
-        dynamic_obstacle_tracker
-                   |
-                   | predicted PointCloud2
-                   v
-      /dynamic_obstacles/predicted_points
-                   |
-                   v
-          Nav2 local costmap
-                   |
-                   v
-               DWB controller
-                   |
-                   v
-      /diff_drive_controller/cmd_vel_unstamped
+~/ros2_ws/maps/ms616_map.yaml
+~/ros2_ws/maps/ms616_map.pgm
 ```
 
-The tracker adds short-horizon prediction rather than only reacting to the
-obstacle's current LiDAR position:
+Keep both files. The YAML references the image file.
 
-1. LiDAR returns are segmented into compact clusters.
-2. Cluster centroids are transformed into `odom`.
-3. Clusters are associated between scans.
-4. A filtered velocity estimate is formed for each track.
-5. Tracks moving faster than the configured threshold are extrapolated about
-   1.1 s into the future.
-6. The predicted occupied tube is published as `PointCloud2`.
-7. The Nav2 local costmap marks those predicted points.
-8. DWB rejects / penalizes candidate trajectories that enter the predicted
-   occupied region.
+### Phase B — start fresh and localize in the saved map
 
-Static obstacles still come directly from `/scan`.
+Start a fresh simulator instance; do not leave the mapping launch running.
 
-## 5. Main parameters
+**Terminal 1 — Gazebo + RViz:**
 
-The important tuning is in `config/nav2_params.yaml` and the
-`dynamic_nav.launch.py` arguments.
-
-Tracker defaults:
-
-- prediction horizon: 1.10 s
-- dynamic-speed threshold: 0.10 m/s
-- prediction lateral radius: 0.12 m
-- association distance: 0.50 m
-- track timeout: 0.60 s
-
-Local costmap gets two obstacle sources:
-
-```text
-scan                -> current LiDAR obstacles
- dynamic_prediction -> predicted moving obstacles
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch ms616 gazebo.launch.py dynamic_obstacles:=true rviz:=true
 ```
 
-The global costmap remains scan + static map only. That is intentional: the
-moving object should not be permanently written into the global map.
+Use `dynamic_obstacles:=false` for a static-obstacle baseline. The default world contains the moving obstacles; the manager is enabled only when `dynamic_obstacles:=true`.
 
-## 6. Why the RQT graph is smaller now
+**Terminal 2 — saved-map localization + Nav2:**
 
-Do not launch the old independent reactive controller alongside Nav2. The old
-`obstacle_avoidance.py` publishes its own velocity command and will fight the
-Nav2 controller if both are active.
-
-The canonical graph is approximately:
-
-```text
-Gazebo / ros2_control
-        |
-        +--> /scan ------> Cartographer ------> /map
-        |       |
-        |       +-------> dynamic_obstacle_tracker
-        |                         |
-        |                         v
-        |                predicted obstacles
-        |                         |
-        +--> /odom --------------+----> Nav2 local costmap
-                                          |
-/map ------------------------------> Nav2 planner
-                                          |
-                                   global path + costmap
-                                          |
-                                       DWB
-                                          |
-                                          v
-                             diff_drive_controller
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch ms616 saved_map_nav.launch.py \
+  map:=$HOME/ros2_ws/maps/ms616_map.yaml
 ```
 
-The important navigation nodes are:
+This starts:
 
-```text
-cartographer_node
-cartographer_occupancy_grid_node
-dynamic_obstacle_tracker
-planner_server
-controller_server
-behavior_server
-bt_navigator
-lifecycle_manager_navigation
-autonomous_mapper   # only for frontier exploration
+- the EKF, fusing wheel odometry and IMU to publish filtered local odometry;
+- the saved map server;
+- AMCL, which uses the current LiDAR scan and saved map to estimate the global robot pose;
+- Nav2's planner, controller, behavior server, and BT navigator;
+- global and local costmaps that use the saved map and current LiDAR scans.
+
+**Initialize AMCL in RViz:** choose **2D Pose Estimate**, then click and drag at the robot's approximate current pose and heading. Wait for the LiDAR scan to align with the saved-map walls/obstacles before sending a goal. This tool initializes the robot pose; it is not the destination tool.
+
+### Send a goal from the terminal
+
+Get the desired point's coordinates in the `map` frame. In RViz, select **Publish Point**, start this command in a terminal, and click the point on the map:
+
+```bash
+ros2 topic echo /clicked_point --once
 ```
 
-The optional `smoother_server`, `waypoint_follower`, and `velocity_smoother`
-are intentionally not launched by `dynamic_nav.launch.py` because this project
-only needs `NavigateToPose` and a differential-drive command path.
+Use the resulting `x` and `y` values. Pick the desired final heading in degrees (`yaw_deg`):
 
-For a readable RQT graph, use `rqt_graph` in node-focused mode and hide
-standard plumbing topics such as `/tf`, `/tf_static`, `/clock`,
-`/parameter_events`, and `/rosout`.
+```bash
+ros2 launch ms616 goal_from_terminal.launch.py \
+  x:=1.5 y:=0.8 yaw_deg:=90
+```
 
-## 7. Manual navigation test
+Replace the example coordinates and heading with your goal. The coordinates are in **the saved map's `map` frame**, in metres. The launch starts a small goal-sender node; it sends a `NavigateToPose` action to the already-running Nav2 stack. Nav2 itself generates the path and controls the robot.
 
-With `autonomous_explore:=false`, you can send a test goal directly through
-Nav2's action interface or from RViz.
+You can send a goal directly in RViz instead by selecting **Nav2 Goal** (sometimes labelled **2D Goal Pose**) and clicking/dragging to set the destination and desired heading. Do not run the terminal goal sender and an autonomous explorer at the same time.
 
-For example, inspect the action server with:
+Useful checks:
 
 ```bash
 ros2 action list | grep navigate_to_pose
+ros2 lifecycle get /controller_server
+ros2 lifecycle get /amcl
+ros2 topic echo /odometry/filtered --once
+ros2 topic echo /scan --once
 ```
 
-Then use RViz's Nav2 Goal tool.
+The action `/navigate_to_pose` should exist and `controller_server` / `amcl` should become `active`. If localization looks wrong, reinitialize with **2D Pose Estimate** before changing planner settings.
 
-## 8. Legacy launch names
+## 3. Experimental workflow: online SLAM + frontier exploration
 
-`explore.launch.py`, `slam_explore.launch.py`, and `controller.launch.py` are
-kept only as compatibility wrappers. Use `dynamic_nav.launch.py` for the
-actual navigation stack.
+This is the older workflow where the robot builds a map while Nav2 explores. It is useful for testing frontier exploration and the optional moving-obstacle predictor, but it combines more components and is not the recommended routine navigation mode.
+
+**Terminal 1 — Gazebo:**
+
+```bash
+ros2 launch ms616 gazebo.launch.py dynamic_obstacles:=true rviz:=true
+```
+
+**Terminal 2 — Cartographer + Nav2 + dynamic prediction + autonomous exploration:**
+
+```bash
+ros2 launch ms616 dynamic_nav.launch.py \
+  autonomous_explore:=true dynamic_avoidance:=true
+```
+
+To run the same live-SLAM stack without autonomous frontier exploration (so you can send goals manually):
+
+```bash
+ros2 launch ms616 dynamic_nav.launch.py \
+  autonomous_explore:=false dynamic_avoidance:=true
+```
+
+To compare against normal LiDAR costmap avoidance without the custom predictor:
+
+```bash
+ros2 launch ms616 dynamic_nav.launch.py \
+  autonomous_explore:=false dynamic_avoidance:=false
+```
+
+When `autonomous_explore:=true`, `autonomous_mapper` sends its own goals. Do not send a manual goal at the same time; disable frontier exploration if testing manual goals.
+
+## 4. What the dynamic-obstacle predictor does
+
+In the online-SLAM workflow, the optional tracker adds a short-horizon motion prediction layer:
+
+```text
+/scan
+  |
+  v
+dynamic_obstacle_tracker
+  |
+  v
+/dynamic_obstacles/predicted_points (PointCloud2)
+  |
+  v
+Nav2 local costmap
+  |
+  v
+DWB local controller
+  |
+  v
+/diff_drive_controller/cmd_vel_unstamped
+```
+
+At a high level, the tracker clusters LiDAR returns, associates clusters between scans, estimates their velocities, and extrapolates sufficiently fast tracks into the near future. The predicted points are added to the local costmap so DWB can penalize trajectories that intersect predicted occupancy. Static and currently visible obstacles still come from `/scan`.
+
+The current saved-map launch uses standard Nav2 LiDAR obstacle layers for newly observed obstacles. It does **not** launch the custom velocity-prediction tracker. Add and validate that layer in saved-map mode separately only after saved-map localization and baseline navigation are reliable.
+
+## 5. Obstacle clearance and narrow passages
+
+The robot model's configured `robot_radius` is `0.17 m`, giving a nominal diameter of about `0.34 m`. The planner and costmaps account for obstacle costs and inflation, but the frontier selector and local controller have different responsibilities. A path through a corridor that is narrower than the robot plus clearance margin is not physically feasible; no planner tuning can fix that geometry.
+
+The saved-map global planner is configured with `allow_unknown: false`, so it will not deliberately plan through unknown map cells. The local costmap continuously uses current `/scan` measurements to mark and clear obstacles near the robot.
+
+## 6. Main topics and nodes
+
+For the saved-map workflow, focus on:
+
+```text
+/scan
+/imu/data_raw
+/diff_drive_controller/odom
+/odometry/filtered
+/map
+/tf
+/tf_static
+/initialpose
+/navigate_to_pose
+/plan
+/local_costmap/costmap
+/global_costmap/costmap
+/diff_drive_controller/cmd_vel_unstamped
+```
+
+Core nodes include `ekf_filter_node`, `map_server`, `amcl`, `planner_server`, `controller_server`, `behavior_server`, `bt_navigator`, and the lifecycle managers. In online-SLAM mode, also expect `cartographer_node`, `cartographer_occupancy_grid_node`, and optionally `dynamic_obstacle_tracker` and `autonomous_mapper`.
+
+The RQT graph may still look large because ROS 2 actions, lifecycle management, TF, parameters, and standard topics create many edges. For a clearer overview, use node-focused mode and hide `/tf`, `/tf_static`, `/clock`, `/parameter_events`, and `/rosout` when inspecting the graph.
+
+## 7. Important cautions
+
+- Do not run the old independent `obstacle_avoidance.py` / VFH controller at the same time as Nav2. Both can publish velocity commands and fight each other.
+- Ensure simulation time is enabled for every node in Gazebo/RViz workflows. The launch files default to `use_sim_time:=true`. Avoid starting a second RViz instance without `use_sim_time` enabled.
+- Run only one navigation stack at a time. Stop `dynamic_nav.launch.py` before starting `saved_map_nav.launch.py`, and vice versa.
+- The standard local costmap reacts to current obstacle observations; predictive moving-obstacle avoidance is only enabled in the online-SLAM `dynamic_nav.launch.py` workflow in this patch.
+
+## 8. Legacy launch files
+
+`explore.launch.py`, `slam_explore.launch.py`, and `controller.launch.py` are retained for compatibility. For the staged workflow use `mapping_gazebo.launch.py` + `mapping.launch.py`, then `gazebo.launch.py` + `saved_map_nav.launch.py`. Use `dynamic_nav.launch.py` only for the experimental live-SLAM/frontier-exploration workflow.
