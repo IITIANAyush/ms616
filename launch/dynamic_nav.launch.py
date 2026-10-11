@@ -32,6 +32,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_share = get_package_share_directory("ms616")
     nav2_params = os.path.join(pkg_share, "config", "nav2_params.yaml")
+    ekf_params = os.path.join(pkg_share, "config", "ekf.yaml")
     cartographer_config_dir = os.path.join(pkg_share, "config")
 
     use_sim_time = LaunchConfiguration("use_sim_time")
@@ -47,6 +48,18 @@ def generate_launch_description():
             description="Enable LiDAR dynamic-obstacle prediction",
         ),
 
+        # ---------------- Fused local odometry ----------------
+        # EKF is the sole publisher of odom -> base_link. It fuses wheel
+        # odometry and IMU; Cartographer separately uses LiDAR scans to build
+        # the map and publish map -> odom.
+        Node(
+            package="robot_localization",
+            executable="ekf_node",
+            name="ekf_filter_node",
+            output="screen",
+            parameters=[ekf_params, {"use_sim_time": use_sim_time}],
+        ),
+
         # ---------------- SLAM ----------------
         Node(
             package="cartographer_ros",
@@ -59,7 +72,7 @@ def generate_launch_description():
                 "-configuration_basename", "ms616_cartographer.lua",
             ],
             remappings=[
-                ("odom", "/diff_drive_controller/odom"),
+                ("odom", "/odometry/filtered"),
                 ("scan", "/scan"),
                 ("imu", "/imu/data_raw"),
             ],

@@ -43,4 +43,10 @@ install(PROGRAMS
   RENAME dynamic_obstacle_tracker
 )
 
+install(PROGRAMS
+  auto_controller/terminal_goal.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME terminal_goal
+)
+
 ament_package()
